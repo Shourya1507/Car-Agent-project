@@ -23,10 +23,15 @@ from backend.adapters.signing_local import LocalEcdsaSigningAdapter
 from backend.pdf.report_generator import generate_report_pdf
 
 def seed_demo_data(db: LocalDbAdapter, storage: LocalStorageAdapter, signer: LocalEcdsaSigningAdapter):
-    """Pre-populates demonstration data so the app has immediate rich reports on launch."""
-    existing = db.list_inspections("usr_demo_buyer")
-    if existing:
-        return
+    """Pre-populates demonstration data so the app has immediate rich reports on launch.
+    
+    Idempotent: only seeds fixtures that don't already exist, regardless of other
+    inspections in the database (safe to call on every server start).
+    """
+    FIXTURE_IDS = {"insp_base_chr01", "insp_return_chr02", "insp_nocar_demo"}
+    existing_ids = {i.inspectionId for i in db.list_inspections("usr_demo_buyer")}
+    if FIXTURE_IDS.issubset(existing_ids):
+        return  # All demo fixtures already present
 
     print("Initializing demo inspection fixtures...")
 
