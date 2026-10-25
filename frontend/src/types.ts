@@ -57,6 +57,7 @@ export interface ReportSchema {
   carModel: string;
   year: number;
   inspectionDate: string;
+  carDetected?: boolean;
   score: number;
   scoreSummary: string;
   coverage: CoverageItem[];
@@ -79,6 +80,7 @@ export interface Inspection {
   type: 'STANDARD' | 'BASELINE' | 'COMPARISON';
   baselineId?: string;
   trustMode: boolean;
+  carDetected?: boolean;
   status: 'CREATED' | 'UPLOADED' | 'PROCESSING' | 'NEEDS_RETAKE' | 'DONE' | 'FAILED';
   score?: number;
   trustLevel?: 'VERIFIED' | 'PARTIAL' | 'UNVERIFIED';

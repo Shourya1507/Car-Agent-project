@@ -123,6 +123,48 @@ export const InspectionModal: React.FC<InspectionModalProps> = ({
             </div>
           )}
 
+          {/* Quick Presets & Testing Scenarios */}
+          <div>
+            <label className="block text-[11px] font-mono uppercase text-neutral-400 mb-1.5">
+              Quick Presets / Testing Scenarios
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCarMake('Toyota');
+                  setCarModel('CH-R');
+                  setYear(2026);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium border border-neutral-700"
+              >
+                🚗 Toyota CH-R
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCarMake('Honda');
+                  setCarModel('Civic');
+                  setYear(2025);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium border border-neutral-700"
+              >
+                🚗 Honda Civic
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCarMake('NoCar');
+                  setCarModel('Room / Non-Vehicle');
+                  setYear(2026);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900/80 text-red-300 text-xs font-bold border border-red-700"
+              >
+                🚫 Test: No Car Detected
+              </button>
+            </div>
+          </div>
+
           {/* Car Make, Model, Year */}
           <div className="grid grid-cols-2 gap-3">
             <div>

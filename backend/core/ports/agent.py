@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from backend.core.models import ReportSchema, Finding, CoverageItem, IntegritySummary, ChangeItem
 
 class AgentPort(ABC):
@@ -15,6 +15,7 @@ class AgentPort(ABC):
         damage_findings: List[Finding],
         integrity_summary: IntegritySummary,
         baseline_diff: Optional[List[ChangeItem]] = None,
+        car_detected: bool = True,
     ) -> ReportSchema:
         """
         Orchestrates Bedrock Agent reasoning:

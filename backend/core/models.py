@@ -129,6 +129,7 @@ class ReportSchema(BaseModel):
     carModel: str
     year: int
     inspectionDate: str
+    carDetected: bool = True
     score: int # 0 to 100
     scoreSummary: str
     coverage: List[CoverageItem]
@@ -159,6 +160,7 @@ class Inspection(BaseModel):
     type: Literal["STANDARD", "BASELINE", "COMPARISON"] = "STANDARD"
     baselineId: Optional[str] = None
     trustMode: bool = True
+    carDetected: Optional[bool] = None
     status: Literal["CREATED", "UPLOADED", "PROCESSING", "NEEDS_RETAKE", "DONE", "FAILED"] = "CREATED"
     score: Optional[int] = None
     trustLevel: Optional[Literal["VERIFIED", "PARTIAL", "UNVERIFIED"]] = None

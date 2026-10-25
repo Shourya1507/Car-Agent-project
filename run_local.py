@@ -117,28 +117,31 @@ def seed_demo_data(db: LocalDbAdapter, storage: LocalStorageAdapter, signer: Loc
     storage.save_bytes(base_pdf_key, base_pdf_bytes, "application/pdf")
     base_report.pdfKey = base_pdf_key
 
-    baseline_inspection = Inspection(
-        inspectionId=base_id,
-        userId="usr_demo_buyer",
-        carMake="Toyota",
-        carModel="CH-R",
-        year=2026,
-        type="BASELINE",
-        trustMode=True,
-        status="DONE",
-        score=base_score,
-        trustLevel="VERIFIED",
-        videoSha256=base_integrity.videoSha256,
-        reportSignature=base_report.reportSignature,
-        reportHash=base_report.reportHash,
-        retakeRound=0,
-        createdAt="2026-10-21T14:30:00Z",
-        updatedAt="2026-10-21T14:31:00Z",
-        reportKey=base_pdf_key,
-        report=base_report
-    )
-    db.save_inspection(baseline_inspection)
-    db.save_findings(base_id, [base_finding])
+    # Check if baseline exists
+    if not db.get_inspection("usr_demo_buyer", base_id):
+        baseline_inspection = Inspection(
+            inspectionId=base_id,
+            userId="usr_demo_buyer",
+            carMake="Toyota",
+            carModel="CH-R",
+            year=2026,
+            type="BASELINE",
+            trustMode=True,
+            status="DONE",
+            score=base_score,
+            trustLevel="VERIFIED",
+            videoSha256=base_integrity.videoSha256,
+            reportSignature=base_report.reportSignature,
+            reportHash=base_report.reportHash,
+            retakeRound=0,
+            createdAt="2026-10-21T14:30:00Z",
+            updatedAt="2026-10-21T14:31:00Z",
+            reportKey=base_pdf_key,
+            report=base_report,
+            carDetected=True
+        )
+        db.save_inspection(baseline_inspection)
+        db.save_findings(base_id, [base_finding])
 
     # 2. Return / Comparison Inspection (Handover Mode)
     comp_id = "insp_return_chr02"
@@ -219,7 +222,8 @@ def seed_demo_data(db: LocalDbAdapter, storage: LocalStorageAdapter, signer: Loc
             "Changes detected between two walkaround scans; does not assign legal fault."
         ],
         trust=comp_integrity.model_dump(),
-        changes=comp_changes
+        changes=comp_changes,
+        carDetected=True
     )
 
     comp_json_str = comp_report.model_dump_json(exclude={"reportSignature", "reportHash", "pdfKey"})
@@ -232,31 +236,119 @@ def seed_demo_data(db: LocalDbAdapter, storage: LocalStorageAdapter, signer: Loc
     storage.save_bytes(comp_pdf_key, comp_pdf_bytes, "application/pdf")
     comp_report.pdfKey = comp_pdf_key
 
-    comparison_inspection = Inspection(
-        inspectionId=comp_id,
-        userId="usr_demo_buyer",
-        carMake="Toyota",
-        carModel="CH-R",
-        year=2026,
-        type="COMPARISON",
-        baselineId=base_id,
-        trustMode=True,
-        status="DONE",
-        score=comp_score,
-        trustLevel="VERIFIED",
-        videoSha256=comp_integrity.videoSha256,
-        reportSignature=comp_report.reportSignature,
-        reportHash=comp_report.reportHash,
-        retakeRound=0,
-        createdAt="2026-10-23T09:15:00Z",
-        updatedAt="2026-10-23T09:16:00Z",
-        reportKey=comp_pdf_key,
-        report=comp_report
-    )
-    db.save_inspection(comparison_inspection)
-    db.save_findings(comp_id, [base_finding, new_finding])
+    if not db.get_inspection("usr_demo_buyer", comp_id):
+        comparison_inspection = Inspection(
+            inspectionId=comp_id,
+            userId="usr_demo_buyer",
+            carMake="Toyota",
+            carModel="CH-R",
+            year=2026,
+            type="COMPARISON",
+            baselineId=base_id,
+            trustMode=True,
+            status="DONE",
+            score=comp_score,
+            trustLevel="VERIFIED",
+            videoSha256=comp_integrity.videoSha256,
+            reportSignature=comp_report.reportSignature,
+            reportHash=comp_report.reportHash,
+            retakeRound=0,
+            createdAt="2026-10-23T09:15:00Z",
+            updatedAt="2026-10-23T09:16:00Z",
+            reportKey=comp_pdf_key,
+            report=comp_report,
+            carDetected=True
+        )
+        db.save_inspection(comparison_inspection)
+        db.save_findings(comp_id, [base_finding, new_finding])
 
-    print("Demo fixtures seeded successfully (1 Baseline, 1 Return Handover Comparison).")
+    # 3. No Car Detected Demonstration Inspection
+    no_car_id = "insp_nocar_demo"
+    if not db.get_inspection("usr_demo_buyer", no_car_id):
+        no_car_img = np.full((360, 640, 3), 45, dtype=np.uint8)
+        cv2.putText(no_car_img, "NO VEHICLE IN VIEW", (160, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+        _, nc_enc = cv2.imencode(".jpg", no_car_img)
+        nc_bytes = nc_enc.tobytes()
+        nc_frame_key = f"frames/{no_car_id}/front/0.jpg"
+        storage.save_bytes(nc_frame_key, nc_bytes, "image/jpeg")
+
+        nc_coverage = [
+            CoverageItem(viewpoint=vp, captured=False, frameCount=0, bestQualityScore=0.0)
+            for vp in VIEWPOINTS
+        ]
+
+        nc_integrity = IntegritySummary(
+            challengePassed=False,
+            inAppCapture=True,
+            videoSha256="0000000000000000000000000000000000000000000000000000000000000000",
+            sha256Match=True,
+            hardCutCount=0,
+            plateConsistent=False,
+            appearanceConsistent=False,
+            trustLevel="UNVERIFIED",
+            reasons=[
+                "No vehicle detected in video walkaround footage",
+                "Automated damage inspection aborted: zero vehicle contours or wheel landmarks",
+                "Inspection cannot be certified without an identifiable motor vehicle"
+            ]
+        )
+
+        nc_report = ReportSchema(
+            inspectionId=no_car_id,
+            carMake="NoCar",
+            carModel="Test",
+            year=2026,
+            inspectionDate="2026-10-25 12:00 UTC",
+            score=0,
+            scoreSummary="No car detected in the provided video frames.",
+            coverage=nc_coverage,
+            findings=[],
+            sellerQuestions=[
+                "Ensure the entire vehicle is positioned within camera frame prompts before initiating walkaround.",
+                "Verify camera lens is unobstructed and lighting conditions allow the vehicle body to be clearly visible."
+            ],
+            limitations=[
+                "Screening tool only: not a certification of accident-free condition.",
+                "INSPECTION VOID: No vehicle detected in uploaded walkaround footage."
+            ],
+            trust=nc_integrity.model_dump(),
+            carDetected=False
+        )
+
+        nc_json_str = nc_report.model_dump_json(exclude={"reportSignature", "reportHash", "pdfKey"})
+        nc_digest = hashlib.sha256(nc_json_str.encode("utf-8")).digest()
+        nc_report.reportHash = hashlib.sha256(nc_json_str.encode("utf-8")).hexdigest()
+        nc_report.reportSignature = signer.sign_digest(nc_digest)
+
+        nc_pdf_bytes = generate_report_pdf(nc_report, verify_url=f"/reports/{no_car_id}/verify")
+        nc_pdf_key = f"reports/{no_car_id}/report.pdf"
+        storage.save_bytes(nc_pdf_key, nc_pdf_bytes, "application/pdf")
+        nc_report.pdfKey = nc_pdf_key
+
+        no_car_inspection = Inspection(
+            inspectionId=no_car_id,
+            userId="usr_demo_buyer",
+            carMake="NoCar",
+            carModel="Test",
+            year=2026,
+            type="STANDARD",
+            trustMode=True,
+            status="DONE",
+            score=0,
+            trustLevel="UNVERIFIED",
+            videoSha256=nc_integrity.videoSha256,
+            reportSignature=nc_report.reportSignature,
+            reportHash=nc_report.reportHash,
+            retakeRound=0,
+            createdAt="2026-10-25T12:00:00Z",
+            updatedAt="2026-10-25T12:01:00Z",
+            reportKey=nc_pdf_key,
+            report=nc_report,
+            carDetected=False
+        )
+        db.save_inspection(no_car_inspection)
+
+    print("Demo fixtures seeded successfully (1 Baseline, 1 Return Handover, 1 No-Car Detected).")
 
 def main():
     print("=" * 72)

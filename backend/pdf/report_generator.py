@@ -102,25 +102,32 @@ def generate_report_pdf(report: ReportSchema, verify_url: str = "") -> bytes:
     story.append(Spacer(1, 10))
 
     # 3. Vehicle Overview & Score Box
-    score_color = "#16A34A" if report.score >= 80 else ("#D97706" if report.score >= 60 else "#DC2626")
-    score_html = f"<font size='26' color='{score_color}'><b>{report.score}/100</b></font><br/><font size='9'>Condition Score</font>"
-    
-    trust_level = report.trust.get("trustLevel", "UNVERIFIED")
-    trust_color = "#16A34A" if trust_level == "VERIFIED" else ("#D97706" if trust_level == "PARTIAL" else "#DC2626")
-    trust_html = f"<font size='14' color='{trust_color}'><b>{trust_level}</b></font><br/><font size='8'>Trust Layer Integrity</font>"
+    if not getattr(report, "carDetected", True):
+        score_html = "<font size='22' color='#DC2626'><b>N/A</b></font><br/><font size='8' color='#991B1B'><b>No Car Detected</b></font>"
+        trust_level = "UNVERIFIED"
+        trust_color = "#DC2626"
+        trust_html = f"<font size='14' color='{trust_color}'><b>{trust_level}</b></font><br/><font size='8'>No Vehicle Found</font>"
+        summary_text = "<font color='#DC2626'><b>NO CAR DETECTED:</b> Computer vision analysis found no vehicle in the submitted footage. Defect scanning was aborted.</font>"
+    else:
+        score_color = "#16A34A" if report.score >= 80 else ("#D97706" if report.score >= 60 else "#DC2626")
+        score_html = f"<font size='26' color='{score_color}'><b>{report.score}/100</b></font><br/><font size='9'>Condition Score</font>"
+        trust_level = report.trust.get("trustLevel", "UNVERIFIED")
+        trust_color = "#16A34A" if trust_level == "VERIFIED" else ("#D97706" if trust_level == "PARTIAL" else "#DC2626")
+        trust_html = f"<font size='14' color='{trust_color}'><b>{trust_level}</b></font><br/><font size='8'>Trust Layer Integrity</font>"
+        summary_text = report.scoreSummary
 
     overview_data = [
         [
-            Paragraph(f"<b>Vehicle:</b> {report.year} {report.carMake} {report.carModel}<br/><b>Summary:</b> {report.scoreSummary}", body_style),
+            Paragraph(f"<b>Vehicle:</b> {report.year} {report.carMake} {report.carModel}<br/><b>Summary:</b> {summary_text}", body_style),
             Paragraph(score_html, body_style),
             Paragraph(trust_html, body_style)
         ]
     ]
     overview_table = Table(overview_data, colWidths=[320, 110, 110])
     overview_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
-        ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FEF2F2") if not getattr(report, "carDetected", True) else colors.HexColor("#F8FAFC")),
+        ('BOX', (0,0), (-1,-1), 1 if not getattr(report, "carDetected", True) else 0.5, colors.HexColor("#FCA5A5") if not getattr(report, "carDetected", True) else colors.HexColor("#E2E8F0")),
+        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#FCA5A5") if not getattr(report, "carDetected", True) else colors.HexColor("#E2E8F0")),
         ('TOPPADDING', (0,0), (-1,-1), 8),
         ('BOTTOMPADDING', (0,0), (-1,-1), 8),
         ('LEFTPADDING', (0,0), (-1,-1), 8),

@@ -163,3 +163,37 @@ def test_condition_score_calculation():
     f4 = Finding(type="paint_mismatch", panel="door", severity="major", confidence=0.9, evidenceKey="c4", note="Paint")
     score_multi, _ = calculate_condition_score([f1, f2, f3, f4])
     assert score_multi < 60
+
+def test_detect_vehicle_presence_blank_and_car():
+    from backend.cv.vehicle_detection import detect_vehicle_presence, check_video_for_vehicle
+
+    # 1. Blank/featureless image -> No car detected
+    # detect_vehicle_presence returns a VehicleDetectionResult object
+    blank_frame = np.full((360, 640, 3), 180, dtype=np.uint8)
+    result_blank = detect_vehicle_presence(blank_frame)
+    assert result_blank.car_detected is False
+    assert result_blank.confidence < 0.40
+    assert "No car" in result_blank.reason or "No structural" in result_blank.reason
+
+    # 2. Synthetic vehicle-like image (central body rectangle + wheel circles in lower half)
+    car_frame = np.full((360, 640, 3), 220, dtype=np.uint8)
+    # Car body (aspect ratio ~ 2.0)
+    cv2.rectangle(car_frame, (120, 100), (520, 260), (50, 50, 150), -1)
+    # Roof cabin
+    cv2.rectangle(car_frame, (200, 50), (440, 120), (40, 40, 120), -1)
+    # Wheels in lower half
+    cv2.circle(car_frame, (200, 260), 30, (20, 20, 20), -1)
+    cv2.circle(car_frame, (440, 260), 30, (20, 20, 20), -1)
+
+    result_car = detect_vehicle_presence(car_frame)
+    assert result_car.car_detected is True
+    assert result_car.confidence > 0.50
+
+    # 3. check_video_for_vehicle returns (bool, float, List[VehicleDetectionResult])
+    detected_on_car, conf_car, frame_results = check_video_for_vehicle([car_frame, car_frame])
+    assert detected_on_car is True
+    assert len(frame_results) > 0
+
+    detected_on_blank, conf_blank_vid, blank_results = check_video_for_vehicle([blank_frame, blank_frame])
+    assert detected_on_blank is False
+

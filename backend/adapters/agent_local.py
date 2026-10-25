@@ -1,6 +1,6 @@
 import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from backend.core.ports.agent import AgentPort
 from backend.core.models import (
     ReportSchema, Finding, CoverageItem, IntegritySummary, ChangeItem
@@ -63,11 +63,48 @@ class LocalBedrockAgentAdapter(AgentPort):
         damage_findings: List[Finding],
         integrity_summary: IntegritySummary,
         baseline_diff: Optional[List[ChangeItem]] = None,
+        car_detected: bool = True,
     ) -> ReportSchema:
         """
         Executes Bedrock Agent workflow with tool invocation, second opinion review,
         reconciliation logic, and Pydantic schema validation.
         """
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+        # Handle NO CAR DETECTED scenario
+        if not car_detected:
+            return ReportSchema(
+                inspectionId=inspection_id,
+                carMake=car_make,
+                carModel=car_model,
+                year=year,
+                inspectionDate=now_utc,
+                carDetected=False,
+                score=0,
+                scoreSummary="No car detected",
+                coverage=[
+                    CoverageItem(
+                        viewpoint=c.viewpoint,
+                        captured=False,
+                        frameCount=0,
+                        bestQualityScore=c.bestQualityScore,
+                        reason="No car detected in frame"
+                    )
+                    for c in coverage
+                ],
+                findings=[],
+                sellerQuestions=[
+                    "Please re-film the walkaround video ensuring the vehicle is well-lit and fully visible within the camera guide outline."
+                ],
+                limitations=[
+                    "NO CAR DETECTED: The computer vision analysis pipeline could not identify a vehicle in the provided video footage.",
+                    "Surface damage detection, paint variation checks, and panel gap measurements cannot be performed without a detected vehicle.",
+                    "Please ensure the vehicle is clean, parked in reasonable daylight, and captured continuously following the 8-viewpoint overlay."
+                ],
+                trust=integrity_summary.model_dump(),
+                changes=None
+            )
+
         # 1. Tool Calls
         q_summary = self.tool_get_quality_summary(coverage)
         cv_data = self.tool_get_cv_measurements(cv_measurements)
@@ -167,7 +204,8 @@ class LocalBedrockAgentAdapter(AgentPort):
             carMake=car_make,
             carModel=car_model,
             year=year,
-            inspectionDate=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            inspectionDate=now_utc,
+            carDetected=True,
             score=score,
             scoreSummary=score_summary,
             coverage=coverage,

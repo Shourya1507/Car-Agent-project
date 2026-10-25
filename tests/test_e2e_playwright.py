@@ -4,6 +4,8 @@ import time
 import os
 import sys
 import httpx
+
+playwright_module = pytest.importorskip("playwright", reason="playwright is not installed in the environment")
 from playwright.sync_api import sync_playwright, Page, expect
 
 @pytest.fixture(scope="module")

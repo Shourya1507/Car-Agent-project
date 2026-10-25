@@ -139,3 +139,52 @@ def test_handover_mode_comparison():
     diff_data = comp_diff_res.json()
     assert diff_data["baselineId"] == base_id
     assert "changes" in diff_data
+
+def test_no_car_detected_workflow():
+    # 1. Create inspection with NoCar make (triggers non-car walkaround simulation)
+    create_res = client.post("/inspections", json={
+        "carMake": "NoCar",
+        "carModel": "BlankTest",
+        "year": 2026,
+        "type": "STANDARD",
+        "trustMode": True
+    })
+    assert create_res.status_code == 201
+    data = create_res.json()
+    inspection_id = data["inspectionId"]
+    upload_url = data["uploadUrl"]
+
+    # 2. Upload dummy video
+    client.put(upload_url, content=b"Non-car dummy video content")
+
+    # 3. Start workflow
+    start_res = client.post(f"/inspections/{inspection_id}/start")
+    assert start_res.status_code == 202
+
+    # 4. Poll until DONE
+    insp_data = {}
+    for _ in range(30):
+        get_res = client.get(f"/inspections/{inspection_id}")
+        assert get_res.status_code == 200
+        insp_data = get_res.json()
+        if insp_data.get("status") in ["DONE", "FAILED"]:
+            break
+        time.sleep(0.5)
+
+    assert insp_data["status"] == "DONE"
+    assert insp_data["carDetected"] is False
+    assert insp_data["score"] == 0
+
+    # 5. Check report details
+    report = insp_data["report"]
+    assert report is not None
+    assert report["carDetected"] is False
+    assert "No car detected" in report["scoreSummary"]
+    assert len(report["findings"]) == 0
+
+    # 6. Check PDF download
+    pdf_res = client.get(f"/inspections/{inspection_id}/report.pdf")
+    assert pdf_res.status_code == 200
+    assert pdf_res.headers["content-type"] == "application/pdf"
+    assert len(pdf_res.content) > 500
+

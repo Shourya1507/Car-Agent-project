@@ -77,15 +77,25 @@ export const Hero: React.FC<HeroProps> = ({
               Condition Score
             </div>
             <div className="mt-3 flex items-baseline space-x-1">
-              <span className="text-5xl font-black text-orange-500 tracking-tight">
-                {latestInspection?.score ?? 82}
-              </span>
-              <span className="text-neutral-500 font-bold text-lg">/100</span>
+              {latestInspection?.carDetected === false ? (
+                <span className="text-2xl font-black text-red-400 tracking-tight">
+                  No Car Detected
+                </span>
+              ) : (
+                <>
+                  <span className="text-5xl font-black text-orange-500 tracking-tight">
+                    {latestInspection?.score ?? 82}
+                  </span>
+                  <span className="text-neutral-500 font-bold text-lg">/100</span>
+                </>
+              )}
             </div>
           </div>
           <div className="mt-6 pt-4 border-t border-neutral-800/80">
             <p className="text-xs text-neutral-300 font-medium">
-              {latestInspection?.report?.scoreSummary || "Possible repaint: right front door"}
+              {latestInspection?.carDetected === false
+                ? "No vehicle recognized in walkaround footage"
+                : (latestInspection?.report?.scoreSummary || "Possible repaint: right front door")}
             </p>
             <div className="mt-2 text-[11px] text-neutral-500">
               {latestInspection ? `${latestInspection.carMake} ${latestInspection.carModel}` : "Sample Toyota CH-R"}
@@ -155,8 +165,12 @@ export const Hero: React.FC<HeroProps> = ({
                 className="p-4 sm:px-6 flex items-center justify-between hover:bg-neutral-800/40 transition-colors cursor-pointer"
               >
                 <div className="flex items-center space-x-4">
-                  <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center font-bold text-sm text-orange-400">
-                    {insp.score ? `${insp.score}` : '—'}
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm ${
+                    insp.carDetected === false
+                      ? 'bg-red-950/60 text-red-400 border border-red-800/60'
+                      : 'bg-neutral-800 text-orange-400'
+                  }`}>
+                    {insp.carDetected === false ? 'N/A' : (insp.score ? `${insp.score}` : '—')}
                   </div>
                   <div>
                     <div className="font-bold text-sm sm:text-base text-white">
@@ -166,7 +180,12 @@ export const Hero: React.FC<HeroProps> = ({
                       <span>{insp.type}</span>
                       <span>•</span>
                       <span>{insp.createdAt.split('T')[0]}</span>
-                      {insp.trustLevel && (
+                      {insp.carDetected === false ? (
+                        <>
+                          <span>•</span>
+                          <span className="font-semibold text-red-400">No Car Detected</span>
+                        </>
+                      ) : insp.trustLevel ? (
                         <>
                           <span>•</span>
                           <span className={`font-semibold ${
@@ -176,19 +195,20 @@ export const Hero: React.FC<HeroProps> = ({
                             {insp.trustLevel}
                           </span>
                         </>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-3">
                   <span className={`px-2.5 py-1 rounded-full text-xs font-medium uppercase ${
+                    insp.carDetected === false ? 'bg-red-950/60 text-red-400 border border-red-800/60' :
                     insp.status === 'DONE' ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60' :
                     insp.status === 'PROCESSING' ? 'bg-orange-950/60 text-orange-400 border border-orange-800/60 animate-pulse' :
                     insp.status === 'NEEDS_RETAKE' ? 'bg-amber-950/60 text-amber-400 border border-amber-800/60' :
                     'bg-neutral-800 text-neutral-400'
                   }`}>
-                    {insp.status}
+                    {insp.carDetected === false ? 'No Car Detected' : insp.status}
                   </span>
                   <ArrowRight className="w-4 h-4 text-neutral-500" />
                 </div>

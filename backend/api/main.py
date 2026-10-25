@@ -194,6 +194,7 @@ def get_inspection(id: str, user_id: str = Depends(get_current_user)):
         "year": inspection.year,
         "type": inspection.type,
         "trustMode": inspection.trustMode,
+        "carDetected": inspection.carDetected,
         "score": inspection.score,
         "trustLevel": inspection.trustLevel,
         "retakeRound": inspection.retakeRound,

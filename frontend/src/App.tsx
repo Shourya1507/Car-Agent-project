@@ -39,6 +39,11 @@ export function App() {
   const [retakeRound, setRetakeRound] = useState(0);
 
   const [verifyTargetId, setVerifyTargetId] = useState<string>('');
+  const [currentCarInfo, setCurrentCarInfo] = useState<{ make: string; model: string; year: number }>({
+    make: 'Toyota',
+    model: 'CH-R',
+    year: 2026,
+  });
 
   // Initial load
   const refreshInspections = async () => {
@@ -64,6 +69,11 @@ export function App() {
     trustMode: boolean;
   }) => {
     setIsCreateModalOpen(false);
+    setCurrentCarInfo({
+      make: data.carMake,
+      model: data.carModel,
+      year: data.year,
+    });
     try {
       const res = await createInspection(data);
       setCurrentProcessingId(res.inspectionId);
@@ -221,6 +231,10 @@ export function App() {
               }}
               onShare={handleShare}
               onDelete={handleDelete}
+              onRetake={() => {
+                setCreateModalDefaultType(activeInspection.type || 'STANDARD');
+                setIsCreateModalOpen(true);
+              }}
             />
           ) : (
             <div className="max-w-md mx-auto py-24 text-center">
@@ -252,7 +266,7 @@ export function App() {
       {/* Guided Capture Fullscreen Overlay */}
       {isCapturing && (
         <GuidedCapture
-          carInfo={{ make: 'Toyota', model: 'CH-R', year: 2026 }}
+          carInfo={currentCarInfo}
           challenge={currentChallenge}
           trustMode={true}
           onFinishCapture={handleFinishCapture}
