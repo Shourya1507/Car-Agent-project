@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { X, AlertTriangle, ShieldCheck, Camera, Video, Sparkles, CheckCircle2 } from 'lucide-react';
+import { X, AlertTriangle, ShieldCheck, Video, Sparkles, CheckCircle2 } from 'lucide-react';
 import { Challenge } from '../types';
 
 interface GuidedCaptureProps {
@@ -21,6 +21,110 @@ const VIEWPOINT_NAMES = [
   'Front-right',
 ];
 
+/**
+ * Analyzes a scaled camera frame canvas to verify vehicle presence.
+ * Checks:
+ * 1. Frame valid luminance and dynamic range
+ * 2. Presence of horizontal automotive body contours in the guide zone
+ * 3. Aspect ratio and structural edge density
+ */
+function evaluateVehiclePresence(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): { carDetected: boolean; confidence: number } {
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  // Grayscale conversion
+  const gray = new Uint8Array(width * height);
+  let totalLuma = 0;
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    const luma = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    gray[j] = luma;
+    totalLuma += luma;
+  }
+  const meanLuma = totalLuma / gray.length;
+
+  // Dark or blown-out frames cannot be certified as containing a vehicle
+  if (meanLuma < 25 || meanLuma > 240) {
+    return { carDetected: false, confidence: 0.05 };
+  }
+
+  // Region of Interest: center guide region where car outline sits
+  const roiXStart = Math.floor(width * 0.15);
+  const roiXEnd = Math.floor(width * 0.85);
+  const roiYStart = Math.floor(height * 0.25);
+  const roiYEnd = Math.floor(height * 0.90);
+  const roiW = roiXEnd - roiXStart;
+  const roiH = roiYEnd - roiYStart;
+
+  // Edge and Gradient Orientation Analysis
+  let horizEdges = 0;
+  let vertEdges = 0;
+  let totalEdges = 0;
+
+  for (let y = roiYStart + 1; y < roiYEnd - 1; y += 2) {
+    for (let x = roiXStart + 1; x < roiXEnd - 1; x += 2) {
+      const idx = y * width + x;
+      const gx = Math.abs(gray[idx + 1] - gray[idx - 1]);
+      const gy = Math.abs(gray[idx + width] - gray[idx - width]);
+      const mag = gx + gy;
+      if (mag > 35) {
+        totalEdges++;
+        if (gy > gx * 1.25) horizEdges++;
+        else if (gx > gy * 1.25) vertEdges++;
+      }
+    }
+  }
+
+  const roiSamples = (roiW / 2) * (roiH / 2);
+  const edgeDensity = totalEdges / Math.max(1, roiSamples);
+
+  // Insufficient edges -> plain wall, ceiling, floor, or uniform surface
+  if (edgeDensity < 0.035) {
+    return { carDetected: false, confidence: 0.10 };
+  }
+
+  // High vertical edge dominance -> typically standing human, vertical doorframe, face
+  if (vertEdges > horizEdges * 1.85) {
+    return { carDetected: false, confidence: 0.15 };
+  }
+
+  // Silhouette mass & aspect ratio in ROI
+  let minX = roiXEnd, maxX = roiXStart, minY = roiYEnd, maxY = roiYStart;
+  let massPixels = 0;
+
+  for (let y = roiYStart; y < roiYEnd; y += 2) {
+    for (let x = roiXStart; x < roiXEnd; x += 2) {
+      const val = gray[y * width + x];
+      if (Math.abs(val - meanLuma) > 22) {
+        massPixels++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const bodyW = Math.max(1, maxX - minX);
+  const bodyH = Math.max(1, maxY - minY);
+  const bodyAspect = bodyW / bodyH;
+  const massRatio = massPixels / Math.max(1, roiSamples);
+
+  // Automotive criteria: horizontally elongated body mass with horizontal structural lines
+  const hasAutomotiveShape = bodyAspect >= 1.20 && bodyAspect <= 3.6 && massRatio >= 0.18;
+  const hasAutomotiveEdges = horizEdges >= 12 && edgeDensity >= 0.04 && edgeDensity <= 0.40;
+
+  const isCar = hasAutomotiveShape && hasAutomotiveEdges;
+  const confidence = isCar
+    ? Math.min(0.96, 0.55 + massRatio * 0.4)
+    : Math.max(0.05, 0.35 - massRatio * 0.2);
+
+  return { carDetected: isCar, confidence };
+}
+
 export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
   carInfo,
   challenge,
@@ -32,31 +136,21 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const detectionHistoryRef = useRef<boolean[]>([]);
 
   const [streamActive, setStreamActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [currentViewpointIdx, setCurrentViewpointIdx] = useState(1); // Front-left per design
+  const [currentViewpointIdx, setCurrentViewpointIdx] = useState(1);
   const [recordedDuration, setRecordedDuration] = useState(0);
   const [glareWarning, setGlareWarning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
-  // Car Detection State: 'auto' (live CV check), 'car' (forced detected), 'no_car' (forced none)
-  const [detectionMode, setDetectionMode] = useState<'auto' | 'car' | 'no_car'>('auto');
-  const [liveCarDetected, setLiveCarDetected] = useState(true);
+  // Live real-time computer vision detection state
+  const [liveCarDetected, setLiveCarDetected] = useState(false);
 
   // Challenge nonce (e.g. 4 8 2 1 from UI design)
   const challengeCode = challenge?.nonce || '4821';
   const targetAngle = challenge?.angleOrder?.[5] || 'rear-right corner';
-
-  // Effective detection decision
-  const isCarDetected =
-    detectionMode === 'car'
-      ? true
-      : detectionMode === 'no_car'
-      ? false
-      : carInfo.make.toLowerCase().includes('nocar') || carInfo.model.toLowerCase().includes('nocar')
-      ? false
-      : liveCarDetected;
 
   // Start Camera
   useEffect(() => {
@@ -95,10 +189,10 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
     };
   }, []);
 
-  // Periodic In-Browser Real-Time Vehicle & Quality Analysis
+  // Periodic In-Browser Real-Time Vehicle Analysis
   useEffect(() => {
     const checkInterval = setInterval(() => {
-      if (videoRef.current && canvasRef.current && streamActive && detectionMode === 'auto') {
+      if (videoRef.current && canvasRef.current && streamActive) {
         try {
           const video = videoRef.current;
           const canvas = canvasRef.current;
@@ -107,39 +201,22 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
             canvas.width = 160;
             canvas.height = 90;
             ctx.drawImage(video, 0, 0, 160, 90);
-            const imgData = ctx.getImageData(0, 0, 160, 90);
-            const data = imgData.data;
 
-            // Simple fast luminance & variance check
-            let totalLuma = 0;
-            let varianceSum = 0;
-            const lumas: number[] = [];
-            for (let i = 0; i < data.length; i += 16) {
-              const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-              totalLuma += luma;
-              lumas.push(luma);
-            }
-            const meanLuma = totalLuma / lumas.length;
-            for (const l of lumas) {
-              varianceSum += (l - meanLuma) * (l - meanLuma);
-            }
-            const variance = varianceSum / lumas.length;
+            const result = evaluateVehiclePresence(ctx, 160, 90);
+            setLiveCarDetected(result.carDetected);
 
-            // If camera is completely covered, black, or flat uniform surface (no car)
-            if (meanLuma < 15 || variance < 80) {
-              setLiveCarDetected(false);
-            } else {
-              setLiveCarDetected(true);
+            if (isRecording) {
+              detectionHistoryRef.current.push(result.carDetected);
             }
           }
         } catch {
           // Keep current state
         }
       }
-    }, 800);
+    }, 600);
 
     return () => clearInterval(checkInterval);
-  }, [streamActive, detectionMode]);
+  }, [streamActive, isRecording]);
 
   // Progression timer during recording
   useEffect(() => {
@@ -159,6 +236,8 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
   }, [isRecording]);
 
   const startRecording = () => {
+    detectionHistoryRef.current = [];
+
     if (!videoRef.current || !videoRef.current.srcObject) {
       setIsRecording(true);
       setRecordedDuration(0);
@@ -178,9 +257,18 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
       };
 
       recorder.onstop = async () => {
+        // Evaluate overall detection rate during walkaround
+        const detections = detectionHistoryRef.current;
+        const detectionRatio =
+          detections.length > 0
+            ? detections.filter(Boolean).length / detections.length
+            : liveCarDetected
+            ? 1.0
+            : 0.0;
+
         let fullBlob: Blob;
-        if (!isCarDetected) {
-          // Prefix non-car test tag so backend also knows no vehicle was in view
+        if (detectionRatio < 0.3) {
+          // No car was visible during walkaround
           fullBlob = new Blob(
             ['NO_CAR_WALKAROUND:', ...recordedChunksRef.current],
             { type: 'video/webm' }
@@ -211,7 +299,7 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
       setIsRecording(false);
     } else {
       setIsRecording(false);
-      const tag = isCarDetected
+      const tag = liveCarDetected
         ? `CarCheck Walkaround Video Simulation - ${carInfo.make} ${carInfo.model}`
         : `NO_CAR_WALKAROUND - Non Vehicle Footage Simulation - ${carInfo.make}`;
 
@@ -236,18 +324,6 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
     onFinishCapture(syntheticBlob, hash);
   };
 
-  const handleSimulateNoCar = async () => {
-    const syntheticBlob = new Blob(
-      [`NO_CAR_WALKAROUND: Simulated footage with no vehicle present ${Date.now()}`],
-      { type: 'video/mp4' }
-    );
-    const hashBuf = await crypto.subtle.digest('SHA-256', await syntheticBlob.arrayBuffer());
-    const hash = Array.from(new Uint8Array(hashBuf))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    onFinishCapture(syntheticBlob, hash);
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between overflow-hidden">
       {/* Hidden canvas for video analysis */}
@@ -262,9 +338,9 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
           </span>
         </div>
 
-        {/* Real-time Car Detected Badge */}
+        {/* Real-time Vehicle Presence Detection Badge */}
         <div className="flex items-center space-x-2">
-          {isCarDetected ? (
+          {liveCarDetected ? (
             <div className="bg-emerald-600/90 border border-emerald-400/50 text-white font-bold text-xs px-3.5 py-1.5 rounded-full shadow-lg flex items-center space-x-2 backdrop-blur-md">
               <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse" />
               <span>Car detected</span>
@@ -285,27 +361,29 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
         </div>
       </div>
 
-      {/* Glare / Blur Warning Pill */}
+      {/* Live Warning / Alignment Pill */}
       <div className="relative z-20 flex justify-center px-4 mt-2">
         {glareWarning ? (
           <div className="bg-amber-600/95 text-white font-semibold text-xs px-4 py-1.5 rounded-full shadow-lg flex items-center space-x-2 animate-bounce">
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>Glare: tilt the phone slightly</span>
           </div>
-        ) : !isCarDetected ? (
+        ) : !liveCarDetected ? (
           <div className="bg-red-950/90 border border-red-700 text-red-200 font-semibold text-xs px-4 py-1.5 rounded-full shadow-lg flex items-center space-x-2">
             <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-            <span>Align car inside the dashed outline</span>
+            <span>No car detected · Align vehicle inside frame</span>
           </div>
         ) : (
-          <div className="bg-emerald-600/90 text-white font-medium text-xs px-4 py-1 rounded-full shadow">
-            Good sharpness & vehicle in frame
+          <div className="bg-emerald-950/90 border border-emerald-700 text-emerald-200 font-semibold text-xs px-4 py-1.5 rounded-full shadow-lg flex items-center space-x-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Vehicle aligned · Ready to record</span>
           </div>
         )}
       </div>
 
-      {/* Center Viewport: Video Stream & Ghost Outline Overlay */}
-      <div className="relative flex-1 flex items-center justify-center overflow-hidden my-2">
+      {/* Viewfinder Center Area */}
+      <div className="relative flex-1 flex items-center justify-center p-4">
+        {/* Camera stream video */}
         {streamActive ? (
           <video
             ref={videoRef}
@@ -314,69 +392,78 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
             className="absolute inset-0 w-full h-full object-cover"
           />
         ) : (
-          <div className="flex flex-col items-center justify-center text-center p-6 text-neutral-400">
-            <Camera className="w-12 h-12 text-neutral-600 mb-3" />
-            <p className="text-sm font-semibold text-white">Live Camera Preview</p>
-            <p className="text-xs text-neutral-500 max-w-xs mt-1">
-              Virtual walkaround stream active. Point camera at vehicle.
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950 text-neutral-400 p-6 text-center">
+            <Video className="w-16 h-16 mb-4 text-neutral-600 animate-pulse" />
+            <p className="text-sm font-medium text-neutral-300">
+              {cameraError || 'Camera initializing or simulated environment active.'}
+            </p>
+            <p className="text-xs text-neutral-500 mt-1 max-w-sm">
+              In real walkaround inspections, the camera automatically scans for vehicle contours and wheel hubs.
             </p>
           </div>
         )}
 
-        {/* Car Ghost Outline Wireframe */}
-        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center p-6">
-          <svg
-            className={`w-full max-w-md h-48 sm:h-64 transition-colors ${
-              isCarDetected ? 'text-emerald-400/80' : 'text-red-500/90 animate-pulse'
+        {/* Dynamic Vehicle Alignment Guide Overlay */}
+        <div className="relative z-10 w-full max-w-md aspect-[16/10] flex items-center justify-center pointer-events-none">
+          <div
+            className={`w-full h-full border-2 rounded-3xl transition-all duration-300 relative flex items-center justify-center ${
+              liveCarDetected
+                ? 'border-emerald-500/80 bg-emerald-500/5 shadow-[0_0_30px_rgba(16,185,129,0.2)]'
+                : 'border-dashed border-red-500/70 bg-red-950/10'
             }`}
-            viewBox="0 0 400 160"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeDasharray={isCarDetected ? '6 6' : '4 4'}
           >
-            {/* Dotted car body outline */}
-            <path d="M 40 100 L 70 50 L 140 25 L 260 25 L 320 50 L 360 80 L 370 115 L 340 115 A 25 25 0 0 1 290 115 L 140 115 A 25 25 0 0 1 90 115 L 30 115 Z" />
-            {/* Windows */}
-            <path d="M 145 32 L 200 32 L 200 65 L 120 65 Z" strokeDasharray="4 4" strokeWidth="1.5" />
-            <path d="M 210 32 L 255 32 L 290 65 L 210 65 Z" strokeDasharray="4 4" strokeWidth="1.5" />
-            {/* Wheels */}
-            <circle cx="115" cy="115" r="18" strokeDasharray="3 3" />
-            <circle cx="315" cy="115" r="18" strokeDasharray="3 3" />
-          </svg>
+            {/* Corner alignment markers */}
+            <div className="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-orange-500 rounded-tl-xl" />
+            <div className="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-orange-500 rounded-tr-xl" />
+            <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-orange-500 rounded-bl-xl" />
+            <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-orange-500 rounded-br-xl" />
 
-          {!isCarDetected && (
-            <div className="mt-2 bg-red-950/90 border border-red-800 text-red-300 text-xs font-mono px-3 py-1 rounded-full shadow-lg">
-              ⚠️ No car detected in frame
+            {/* Guide label */}
+            <div className="text-center px-4">
+              <p
+                className={`text-xs font-mono font-bold tracking-wider uppercase transition-colors ${
+                  liveCarDetected ? 'text-emerald-400' : 'text-red-400'
+                }`}
+              >
+                {liveCarDetected
+                  ? `✓ ${carInfo.make} ${carInfo.model} Positioned`
+                  : 'Position Vehicle Inside Outline'}
+              </p>
             </div>
-          )}
+          </div>
         </div>
-      </div>
 
-      {/* Bottom Controls & Challenge Card */}
-      <div className="relative z-20 pb-8 px-4 sm:px-6 space-y-4 bg-gradient-to-t from-black via-black/90 to-transparent pt-4">
-        {/* Trust Mode Challenge Card */}
+        {/* Liveness Nonce Challenge Card (TRD 5.2) */}
         {trustMode && (
-          <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-4 max-w-sm mx-auto backdrop-blur-md text-center shadow-xl">
-            <div className="text-[11px] font-mono font-bold tracking-widest text-neutral-400 uppercase">
-              Capture challenge
+          <div className="absolute top-4 left-4 z-20 bg-neutral-900/95 border border-orange-500/60 rounded-2xl p-3 shadow-2xl backdrop-blur-md max-w-[210px]">
+            <div className="flex items-center space-x-1.5 text-orange-400 mb-1">
+              <ShieldCheck className="w-4 h-4" />
+              <span className="text-[10px] font-mono uppercase tracking-wider font-bold">
+                Anti-Spoof Challenge
+              </span>
             </div>
-            <div className="my-1.5 flex justify-center space-x-3 text-3xl font-black tracking-widest text-white">
+            <p className="text-xs text-neutral-300 font-medium leading-snug">
+              Flash code at <span className="text-orange-400 font-bold">{targetAngle}</span>:
+            </p>
+            <div className="flex items-center justify-center space-x-2 mt-2 bg-neutral-950 border border-neutral-800 rounded-xl py-1 px-2">
               {challengeCode.split('').map((digit, idx) => (
-                <span key={idx} className="bg-neutral-800/80 px-2.5 py-0.5 rounded-lg border border-neutral-700">
+                <span
+                  key={idx}
+                  className="font-mono text-base font-extrabold text-orange-400 tracking-wider"
+                >
                   {digit}
                 </span>
               ))}
             </div>
-            <p className="text-xs text-neutral-400">
-              Show this code in frame at the <span className="text-orange-400 font-semibold">{targetAngle}</span>.
-            </p>
           </div>
         )}
+      </div>
 
-        {/* 8-Viewpoint Progress Indicator */}
-        <div className="max-w-sm mx-auto">
-          <div className="flex justify-between items-center text-xs text-neutral-400 font-mono mb-2">
+      {/* Bottom Controls Bar */}
+      <div className="relative z-20 pb-6 px-4 sm:px-6 bg-gradient-to-t from-black via-black/80 to-transparent pt-4">
+        {/* Progress tracker */}
+        <div className="max-w-md mx-auto mb-4">
+          <div className="flex justify-between text-xs text-neutral-400 font-mono mb-1.5">
             <span>{currentViewpointIdx + 1} of 8 angles covered</span>
             {isRecording && <span className="text-red-500 font-bold">{recordedDuration}s</span>}
           </div>
@@ -396,44 +483,7 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
           </div>
         </div>
 
-        {/* Simulation / Override Toggles for Testing Car Detection */}
-        <div className="max-w-sm mx-auto flex items-center justify-center space-x-2">
-          <button
-            type="button"
-            onClick={() => setDetectionMode('auto')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border transition-all ${
-              detectionMode === 'auto'
-                ? 'bg-neutral-700 border-neutral-500 text-white font-bold'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-            }`}
-          >
-            Auto-Detect
-          </button>
-          <button
-            type="button"
-            onClick={() => setDetectionMode('car')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border transition-all ${
-              detectionMode === 'car'
-                ? 'bg-emerald-900 border-emerald-500 text-emerald-200 font-bold'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-            }`}
-          >
-            🚗 Force Car
-          </button>
-          <button
-            type="button"
-            onClick={() => setDetectionMode('no_car')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border transition-all ${
-              detectionMode === 'no_car'
-                ? 'bg-red-900 border-red-500 text-red-200 font-bold'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-            }`}
-          >
-            🚫 Force No Car
-          </button>
-        </div>
-
-        {/* Shutter Button & Demo Fallbacks */}
+        {/* Shutter Button & Clean Fallback */}
         <div className="flex flex-col items-center justify-center pt-1 space-y-3">
           {!isRecording ? (
             <button
@@ -453,22 +503,14 @@ export const GuidedCapture: React.FC<GuidedCaptureProps> = ({
             </button>
           )}
 
-          {/* Quick Simulation Options */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+          {/* Clean fallback for testing without camera */}
+          <div className="pt-1">
             <button
               onClick={handleSimulateNormalCar}
               className="text-xs text-neutral-400 hover:text-white transition-colors underline underline-offset-4 flex items-center space-x-1"
             >
               <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-              <span>Simulate Car Walkaround</span>
-            </button>
-            <span className="text-neutral-600">•</span>
-            <button
-              onClick={handleSimulateNoCar}
-              className="text-xs text-red-400 hover:text-red-300 transition-colors underline underline-offset-4 flex items-center space-x-1 font-semibold"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-              <span>Simulate Non-Car Footage ("No car detected")</span>
+              <span>Simulate 360° Walkaround</span>
             </button>
           </div>
         </div>

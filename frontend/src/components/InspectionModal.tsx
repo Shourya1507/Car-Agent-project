@@ -154,13 +154,13 @@ export const InspectionModal: React.FC<InspectionModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  setCarMake('NoCar');
-                  setCarModel('Room / Non-Vehicle');
-                  setYear(2026);
+                  setCarMake('Hyundai');
+                  setCarModel('Ioniq 5');
+                  setYear(2024);
                 }}
-                className="px-2.5 py-1 rounded-lg bg-red-950/80 hover:bg-red-900/80 text-red-300 text-xs font-bold border border-red-700"
+                className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium border border-neutral-700"
               >
-                🚫 Test: No Car Detected
+                🚗 Hyundai Ioniq 5
               </button>
             </div>
           </div>

@@ -94,13 +94,23 @@ def detect_vehicle_presence(
             cv2.HOUGH_GRADIENT,
             dp=1.2,
             minDist=int(w * 0.15),
-            param1=80,
-            param2=35,
+            param1=50,
+            param2=20,
             minRadius=int(h * 0.04),
             maxRadius=int(h * 0.22)
         )
         if circles is not None:
-            wheels_found = min(len(circles[0]), 4)
+            valid_wheels = 0
+            for circ in circles[0]:
+                cx, cy, cr = int(circ[0]), int(circ[1]), int(circ[2])
+                if 0 <= cy < lower_half.shape[0] and 0 <= cx < lower_half.shape[1]:
+                    # Validate that wheel patch has dark tyre rubber intensity
+                    mask = np.zeros(lower_half.shape, dtype=np.uint8)
+                    cv2.circle(mask, (cx, cy), max(5, cr), 255, -1)
+                    mean_val = cv2.mean(lower_half, mask=mask)[0]
+                    if mean_val < 110:  # Real tire rubber is dark
+                        valid_wheels += 1
+            wheels_found = min(valid_wheels, 4)
 
     # 4. Multi-Signal Vehicle Scoring
     score = 0.0
@@ -131,12 +141,16 @@ def detect_vehicle_presence(
         reasons.append(f"{wheels_found} wheel/tire candidate(s) detected")
 
     # Signal D: Edge density consistent with automotive seams & glass
-    if 0.015 <= edge_density <= 0.22:
+    if 0.006 <= edge_density <= 0.25:
         score += 0.15
         reasons.append("Automotive edge structure confirmed")
 
     confidence = round(float(min(0.99, max(0.05, score))), 2)
-    car_detected = confidence >= min_confidence and (contour_area_ratio >= 0.08 or wheels_found >= 1)
+    car_detected = (
+        confidence >= min_confidence
+        and contour_area_ratio >= 0.10
+        and (wheels_found >= 1 or (1.15 <= aspect_ratio <= 3.4 and 0.006 <= edge_density <= 0.25))
+    )
 
     primary_reason = reasons[0] if reasons else ("Vehicle detected" if car_detected else "No car detected")
     if not car_detected:

@@ -114,11 +114,10 @@ class LocalWorkflowRunner(WorkflowPort):
                     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-                    # Check duration (10 to 90s) & resolution (at least 720p) per TRD 5
-                    # For tests we permit test clips >= 5s
-                    if duration < 5.0 or duration > 120.0:
+                    # Check duration (relaxed for interactive/webcam testing >= 2.0s)
+                    if duration < 2.0 or duration > 120.0:
                         inspection.status = "FAILED"
-                        inspection.failureReason = f"BAD_VIDEO: Video duration ({duration:.1f}s) must be between 10s and 90s."
+                        inspection.failureReason = f"BAD_VIDEO: Video duration ({duration:.1f}s) must be between 2s and 90s."
                         self.db.save_inspection(inspection)
                         cap.release()
                         return
