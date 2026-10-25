@@ -80,6 +80,11 @@ class RetakeRequest(BaseModel):
 
 # API Endpoints per TRD Section 9
 
+@app.get("/health")
+def health_check():
+    """Liveness probe for container health checks and uptime monitoring."""
+    return {"status": "ok", "version": "1.1.0", "service": "carcheck-agent"}
+
 @app.post("/auth/demo-login")
 def demo_login(email: str = "demo@carcheck.local"):
     """Issues local JWT token for instant testing."""
