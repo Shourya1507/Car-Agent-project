@@ -357,8 +357,12 @@ def seed_demo_data(db: LocalDbAdapter, storage: LocalStorageAdapter, signer: Loc
 
 def main():
     print("=" * 72)
-    print(" CARCHECK AGENT (v1.1) - LOCAL RUNNER")
+    print(" CARCHECK AGENT (v1.1)")
     print("=" * 72)
+
+    # Ensure data directories exist (critical on cold container starts)
+    for sub in ["data/keys", "data/evidence", "data/frames", "data/reports", "data/raw"]:
+        os.makedirs(sub, exist_ok=True)
 
     db = LocalDbAdapter("data/carcheck.db")
     storage = LocalStorageAdapter("data")
@@ -376,7 +380,9 @@ def main():
     print(" • Trust Layer (Challenge code, video SHA-256, Bhattacharyya hard cuts, ECDSA P-256 signing)")
     print(" • Bedrock Agent reasoning simulator with grounding guardrails and PDF report generator\n")
 
-    uvicorn.run("backend.api.main:app", host="0.0.0.0", port=8000, reload=False)
+    port = int(os.environ.get("PORT", 8000))
+    print(f" → Binding to 0.0.0.0:{port}")
+    uvicorn.run("backend.api.main:app", host="0.0.0.0", port=port, reload=False)
 
 if __name__ == "__main__":
     main()
