@@ -2,14 +2,12 @@ services:
   - type: web
     name: carcheck-agent
     runtime: docker
+    plan: free
+    region: oregon
     dockerfilePath: ./Dockerfile
-    # Render injects $PORT automatically — our run_local.py reads it
     healthCheckPath: /health
-    disk:
-      name: carcheck-data
-      mountPath: /app/data
-      sizeGB: 1
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
     autoDeploy: true   # Re-deploy on every push to main
+
