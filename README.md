@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-AWS%20Deployment-brightgreen.svg)](http://15.207.101.82)
 
-🔗 **Live AWS Demo**: [http://15.207.101.82](http://15.207.101.82)
+🔗 **Live AWS Public Demo**: [http://15.207.101.82](http://15.207.101.82) *(or AWS DNS: [http://ec2-15-207-101-82.ap-south-1.compute.amazonaws.com](http://ec2-15-207-101-82.ap-south-1.compute.amazonaws.com))*
 
 ---
 
