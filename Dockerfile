@@ -11,12 +11,12 @@ RUN npm run build
 
 
 # ── Stage 2: Python Runtime ────────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # System deps for OpenCV headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
-     libgl1 \
+    libgl1 \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
